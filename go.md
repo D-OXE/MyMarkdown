@@ -1,4 +1,4 @@
-# http学习记录
+# 学习记录(go/八股)
 
 ## DAY1
 
@@ -216,3 +216,115 @@ User-Agent: curl/7.68.0  # 告知服务器客户端是 cURL
 > 		阻塞模式 → send() 卡死。
 > 		非阻塞模式 → send() 失败并返回 EWOULDBLOCK。
 
+## DAY3 
+
+### go的结构体内嵌/方法内嵌
+
+
+### go接口作为传参的经典问题辨析
+
+```go
+const debug = true	//当debug = false时候,触发panic:out.Write([]byte("done!\n"))
+
+func main() {
+	var buf *bytes.Buffer
+	if debug {
+		buf = new(bytes.Buffer) // enable collection of output
+	}
+	f(buf) // NOTE: subtly incorrect!
+	if debug {
+		// ...use buf...
+	}
+}
+// If out is non-nil, output will be written to it.
+func f(out io.Writer) {
+	// ...do something...
+	if out != nil {
+		out.Write([]byte("done!\n"))
+	}
+}
+
+```
+
+在这个简单的例子中,如注释所说,当debug = false,时候,`out.Write([]byte("done!\n"))` 这里会发生panic.原因有以下几点:
+
+- 空接口调用任何方法都会触发panic
+
+- go的**接口**变量都有两个属性,**动态类型/动态值**,**两者只要有一个是nil,则方法不能被调用**.否则panic.
+
+但是这是个经典问题,**最简单的办法就是将传入的 buf变量(类型原本是 *bytes.Buffer),设置为 io.Writer 接口**.因为这样, **函数形参就不会被传入的实参进行动态类型赋值**,从而在原本程序的流程上,out == nil 就恒成立了(因为此时接口的动态类型没有被赋值导致变化,依旧是nil.go中,接口只声明不赋值,则两个值都视为nil,即便是var inter io.Writer也一样),但是当实参在上述例子中不是io.Writer 类型的接口时候, 形参就发生了一次拷贝, 动态类型不再为nil, 整个 out 变量就不再是nil了, 然后就因为调用了nil动态值, 发生panic.
+
+> 要点: 
+> 1. 接口只声明不赋值,则两个值都视为nil,此时是真正的nil接口.两者有一个不是nil, 则接口不是nil接口
+> 
+> 2. 形参接口类型与实参不同, 会发生动态类型的拷贝.
+
+### go接口的无缝替换使用原则
+
+对于go, 只要实现了某个接口的函数签名, 就是实现了这个接口, 但是一个类实例可能同时实现多个接口的全部方法, 此时, 如果想接口互相转换, 就必须满足一个原则: **假设 A 实现的方法 > B 实现的方法数量,那么, B接口的实例可以赋值给 A ,但是A不能赋值给B接口类型,因为根本上说,B没有实现A所有的方法,B的实例不属于A接口.**
+
+> 多方法的接口 不能  赋值给 少方法的接口 (前提当然是包含关系而不是交集关系): 
+> abc := a     ----> 可以
+> a:= abc      ----> 不行
+> 很好理解,因为想把某个东西当作另一个东西使用,就需要实现目标的所有方法,让自己变成目标的类.
+
+**有待补充**
+
+
+### go的方法内嵌/结构体内嵌
+
+1. **结构体内嵌**
+
+将一个结构体作为另一个结构体的成员就会这样. 新的结构体直接可以访问匿名结构体的成员,相当于匿名结构体的成员被升格了. 不过 ,赋值的时候,需要写明匿名结构体的字段,如下例:
+
+```go
+type A struct {
+    FieldA int
+}
+
+type B struct {
+    A       // 匿名嵌入结构体A
+    FieldB string
+}
+
+b := B{A: A{FieldA: 42}, FieldB: "hello"}
+
+fmt.Println(b.FieldA) // 直接访问A的字段，输出42
+```
+
+嵌套冲突:
+
+- 如果外层结构体和内嵌结构体有同名字段，**外层字段会优先**。(不可喧宾夺主)
+
+- 必须显式指定内嵌结构体名访问被覆盖的字段：
+
+```go
+type C struct {
+    A
+    FieldA string // 与外层同名字段覆盖
+}
+
+c := C{A: A{FieldA: 100}, FieldA: "override"}
+fmt.Println(c.FieldA)         // 输出 "override"（外层优先）
+fmt.Println(c.A.FieldA)       // 输出 100（显式访问内嵌字段）
+```
+
+2. **方法内嵌**
+
+内嵌结构体的方法,外层结构体现在也可以使用:
+
+```go
+func (a A) MethodA() {
+    fmt.Println("MethodA called")
+}
+
+b := B{}
+b.MethodA() // 直接调用A的方法，输出 "MethodA called"
+// 等价于 b.A.MethodA()
+```
+
+- 如果外层结构体定义了同名方法，会**覆盖内嵌结构体的方法**(不可喧宾夺主, 永远是外层的优先)
+
+- 通过内嵌结构体，外层结构体可以隐式实现接口
+
+> 以上特性, 间接的实现了go的OOP特性.实现了继承.
