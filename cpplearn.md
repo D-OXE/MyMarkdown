@@ -11,6 +11,7 @@ C++98 引入的 `auto_ptr` 最终在 C++17 中被正式移除，主要原因在�
 #### 1. **隐式的所有权转移**
    - **问题**：`auto_ptr` 的拷贝构造函数和赋值运算符会**隐式转移所有权**（原指针变为 `nullptr`），而这一行为不符合直觉，容易引发难以察觉的 Bug。
    - **示例**：
+     
      ```cpp
      auto_ptr<int> p1(new int(42));
      auto_ptr<int> p2 = p1;  // p1 现在为空，所有权转移到 p2
@@ -387,28 +388,28 @@ int main() {
 #define BUFFER_SIZE 4096
 
 void handle_read(int fd) {
-    char buf[BUFFER_SIZE];
-    while (1) {
-        ssize_t n = recv(fd, buf, BUFFER_SIZE, 0);
-        if (n > 0) {
-            // 正常读取, 处理数据（如写入磁盘或转发）
-            process_data(buf, n);
-        } else if (n == 0) {
-            // 对端关闭连接
-            close(fd);
-            break;
-        } else {
-            if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                // 数据已读完，退出循环
-                break;
-            } else {
-                // 其他错误（如连接异常）
-                perror("recv error");
-                close(fd);
-                break;
-            }
-        }
-    }
+	char buf[BUFFER_SIZE];
+	while (1) {
+		ssize_t n = recv(fd, buf, BUFFER_SIZE, 0);
+		if (n > 0) {
+			// 正常读取, 处理数据（如写入磁盘或转发）
+			process_data(buf, n);
+		} else if (n == 0) {
+			// 对端关闭连接
+			close(fd);
+			break;
+		} else {
+			if (errno == EAGAIN || errno == EWOULDBLOCK) {
+				// 数据已读完，退出循环
+				break;
+			} else {
+				// 其他错误（如连接异常）
+				perror("recv error");
+				close(fd);
+				break;
+			}
+		}
+	}
 }
 ```
 
@@ -516,16 +517,21 @@ std::unordered_map<int, std::string> um = {{1,"a"}, {2,"b"}, {3,"c"}};
 
 // 危险！存在可能因 rehash 导致崩溃
 for(auto it = um.begin(); it != um.end();) {
-    if(it->first == 2) {
-        it = um.erase(it);  // 语法正确但有隐患
-    } else {
-        ++it;
+	if(it->first == 2) {
+		it = um.erase(it);  // 语法正确但有隐患
+	} else {
+		++it;
     }
 }
 
 // 更安全的做法（C++20）
 std::erase_if(um, [](const auto& pair) {
-    return pair.first == 2;
+	return pair.first == 2;
 });
 
 ```
+
+
+## DAY5
+
+关于C++的STL几个关键组件.
