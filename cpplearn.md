@@ -534,4 +534,170 @@ std::erase_if(um, [](const auto& pair) {
 
 ## DAY5
 
-关于C++的STL几个关键组件.
+关于C++的STL几个关键组件: 容器, 算法, 迭代器, 仿函数, 空间配置器, 容器适配器
+
+
+
+
+
+## DAY6
+
+### 类的访问权限
+
+> 类的**访问权限是基于类 ,而不是基于对象**, 也就是说, 访问权限限制的只有不同的类, 比如AB类之间不能互相访问权限不允许的, 但是A类的ab两个对象却可以访问对方的private成员变量.
+
+```C++
+class myString {
+public:
+	myString() = default;
+	myString(const char* s);					//构造函数
+	~myString();
+
+	myString(const myString& s);				//拷贝构造函数
+	myString(myString&& s) noexcept;			//移动构造函数
+
+	myString& operator=(const myString& s);		//重载赋值运算符
+	myString& operator=(myString&& s) noexcept;	//移动赋值运算符
+
+	myString operator+(const myString& s);
+	bool operator==(const myString& s);
+	bool operator!=(const myString& s);
+
+	char& operator[](int i);
+	int length();
+	int length() const;
+	char* c_str() const;
+
+	friend std::ostream& operator<<(std::ostream& os, const myString& s);
+	// 重载左右移动符号<< />>
+	//<<需要写成友元函数,因为左操作数是ostream类而不是myString
+	// 添加移动语义的内容
+
+
+private:
+	char* str;
+	int len;
+};
+
+/* 比如在这个类中,移动赋值显然需要将对方的指针置为空, 也就是nullptr, 但是如果忘掉了访问权限限制的是什么内容, 就会去重写一个获取指针和长的接口,但是实际上不需要重写API, 而只需要直接置零和nullprt即可:*/
+
+//......其他的代码......
+
+myString::myString(myString&& s) noexcept //noexcept这个关键字在实现函数的时候需要带上.否则编译报错
+    : str(s.str), len(s.len) {
+    s.str = nullptr;  // 将源对象置为空
+    s.len = 0;
+}
+
+myString& myString::operator=(myString&& s) noexcept {
+    if (this != &s) {  // 自赋值检查
+        delete[] str;  // 释放现有资源
+        
+        str = s.str;    // 接管资源,直接访问即可.
+        len = s.len;
+        
+        s.str = nullptr;  // 将源对象置为空
+        s.len = 0;
+    }
+    return *this;
+}
+```
+
+上述代码中, `noexcept` 关键字__必须__要带上, 否则编译器报错. 整个过程其实比较好履清楚, 但是有的细节东西需要重新回顾, 比如类的访问权限限制的到底是那些东西. 对于上述例子, 也可以单独写两个API访问, 但是么有必要.
+
+> **noexcept** :关键字的作用: 表示函数不会抛出异常. 主要有两个作用:
+>
+> 1. **编译器优化**：编译器知道该函数不会抛出异常，可以生成更高效的代码。
+> 2. **标准库优化**：例如 `std::vector` 在重新分配内存时，如果元素的移动构造函数是 `noexcept`，它会优先使用移动而非拷贝（避免异常安全问题）.
+
+---
+
+### async库与std::thread
+
+#### 1. 基本用法
+
+**async**: 启动一个异步任务, 返回值为future,存储结果, 基本语法:
+
+```C++
+#include <future>
+#include <iostream>
+
+int compute() {
+    return 42; // 模拟耗时计算
+}
+
+int main() {
+    // 启动异步任务
+    std::future<int> fut = std::async(std::launch::async, compute);
+    
+    // 获取结果（阻塞直到任务完成）
+    int result = fut.get();
+    std::cout << "Result: " << result << std::endl; // 输出 42
+    return 0;
+}
+```
+
+**async** 的启动策略:
+
+1. std::launch::async: 异步执行 ,**新线程中执行任务**.
+2. std::launch::deferred: **延迟执行直到调用**future::get()或者future::wait().
+
+> 默认策略：`std::launch::async | std::launch::deferred`，由实现决定.
+
+```C++
+auto fut1 = std::async(std::launch::async, compute);    // 明确异步执行
+auto fut2 = std::async(std::launch::deferred, compute); // 延迟执行
+auto fut3 = std::async(compute);                        // 默认策略
+```
+
+
+
+#### std::future的核心功能
+
+`std::future` 用于获取异步任务的结果或异常
+
+1. 获取异步任务结果:`future::get()`;
+   - **阻塞,直到任务完成**,然后返回结果
+   - **只能调用一次**, 多次调用产生未定义行为
+2. 等待任务完成: `future::wait()`
+   - 阻塞直到任务完成，**不获取结果**。
+3. 超时等待:`wait_for()` / `wait_until()`
+   - 设置超时时间，返回任务状态。
+
+如果async执行异常, get()会重新抛出异常
+
+
+
+#### 与std::thread的区别
+
+#### 1. **抽象层级**
+
+- `std::async`：高层抽象，自动管理线程和结果。
+- `std::thread`：底层线程控制，需手动管理生命周期。
+
+#### 2. **返回值处理**
+
+- `std::async`：通过 `std::future` 直接获取返回值。
+- `std::thread`：需通过共享变量或回调传递结果。
+
+#### 3. **异常处理**
+
+- `std::async`：自动捕获异常并通过 `future::get()` 传递。
+- `std::thread`：异常会导致程序终止，除非在线程内捕获。
+
+#### 4. **资源管理**
+
+- `std::async`：返回的 `future` 析构时会自动等待任务完成（若使用 `std::launch::async` 策略）。
+- `std::thread`：必须显式调用 `join()` 或 `detach()`，否则析构时调用 `std::terminate`。
+
+#### 5. **线程复用**
+
+- `std::async`：可能使用线程池（取决于实现）。
+- `std::thread`：每次创建新线程。
+
+### **总结**
+
+- **优先使用 `std::async`**：当需要**简单异步执行并获取结果时，它更安全、简洁。**
+- **使用 `std::thread`**：当需要**精细控制线程行为**（如实时调度、线程优先级）或实现复杂并发模式时。
+- **组合使用**：`std::async` 和 `std::thread` 可与其他并发工具（如 `std::mutex`、`std::condition_variable`）结合，构建高效并发程序。
+
