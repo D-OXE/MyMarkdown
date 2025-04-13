@@ -361,7 +361,42 @@ b.MethodA() // 直接调用A的方法，输出 "MethodA called"
 
 #### gc机制
 
-go 的垃圾回收机制
+Go 的垃圾回收（Garbage Collection, GC）机制是一种自动内存管理技术，用于回收不再使用的内存，防止内存泄漏。Go 的 GC 采用 **并发标记-清除（Concurrent Mark-Sweep）算法**，并在此基础上优化以减少 **STW（Stop-The-World）** 停顿时间。下面从 **基本原理、工作流程、优化策略、GC 调优** 等方面详细解析。
+
+
+
+1. 基本原理:
+
+    Go 的 GC 属于 **追踪式垃圾回收（Tracing GC）**，核心思想是：
+
+   - **标记（Mark）**：从根对象（如全局变量、栈变量）出发，遍历所有可达对象，标记为“存活”。
+   - **清除（Sweep）**：遍历堆内存，回收未被标记的“垃圾”对象。
+
+   Go 的 GC 是 **分代无感知（Non-generational）** 的（Go 1.19 之前），但 Go 1.19+ 引入了 **分代 GC 实验性支持**（`GOGC=generational`）。
+
+2. go的GC流程,4个阶段:
+
+   - ### **`GC 开始`（STW）**
+
+   1. stop the world:暂停所有的goroutine, 准备gc.
+   2. 扫描 **栈、全局变量、寄存器** 等根对象，启动并发标记。 
+
+   - ### **`并发标记`（Concurrent Marking）**
+
+   1. **后台 goroutine** 遍历堆，标记所有可达对象。
+   2. **写屏障（Write Barrier）** 确保并发标记期间，新分配的对象能被正确追踪。
+
+   - ### **`标记终止`（Mark Termination, STW）**
+
+   1. 再次暂停所有 goroutine，完成最终标记。
+   2. 检查是否有遗漏的对象，确保标记准确性。
+
+   - ### **`并发清除`（Concurrent Sweeping）**
+
+   1. 回收未被标记的内存，归还给堆管理。
+   2. 新分配的对象直接进入新的内存空间，不影响回收。
+
+---
 
 ## DAY5 
 
