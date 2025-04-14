@@ -733,3 +733,46 @@ Main function
 4. 测试文件中也可以有 init 函数，会在测试前执行
 
 init 函数是 Go 语言初始化机制的重要组成部分，合理使用可以使代码更加清晰和模块化。
+
+---
+
+## DAY7
+
+### go的并发编程的常用包sync
+
+
+
+**sync.Mutex**:标准互斥量,最基本的同步原语,**实际意思和C++的std::mutex是一样,**不需要过多的赘述.
+
+特点有:
+
+1. 零值就是未锁定的可使用状态
+2. 不能重复获得
+3. 不能被复制
+
+**sync.RWMutex**: 读写锁,与C++一样,也是读操作可以多个线程同时进行,但是写操作则和Mutex一样.不可重入
+
+```go
+var rwmu sync.RWMutex
+var data map[string]string
+
+func read(key string) string {
+    rwmu.RLock()         // 读锁定
+    defer rwmu.RUnlock() // 读解锁
+    return data[key]
+}
+
+func write(key, value string) {
+    rwmu.Lock()         // 写锁定
+    defer rwmu.Unlock() // 写解锁
+    data[key] = value
+}
+```
+
+特点:
+
+1. 适合读多写少的场景.
+2. 读不互斥,**写互斥(与读锁/写锁都互斥)**
+
+>锁只是**约定不做修改操作(互斥锁和读写锁都是这个道理)**,如果我在锁的临界区(读写锁/互斥锁)做修改操作,编译器也检测不出来,只是最后可能得到的结果事与愿违,**锁诞生的意义本来也就是为了避免这个情况发生.**
+
