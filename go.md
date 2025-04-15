@@ -946,6 +946,7 @@ func main() {
     go worker()
     
     mu.Lock()
+    
     for !ready {	// 防止虚假唤醒
         cond.Wait() // 等待条件满足
     }
@@ -962,3 +963,9 @@ func main() {
 4. **`(c *Cond) Broadcast()`**：唤醒所有正在等待 Cond 的 goroutines。同样，如果没有 goroutine 在等待，调用 Broadcast 也不会产生错误。
 
 > 与C++一样,**需要防止虚假唤醒**,但是C++的虚假唤醒比go的轻松一些,因为C++的std::conditionvariale,2号参数可以直接写一个判断是否虚假唤醒的判断条件. 上例中,如果ready是true ,那么main routine就可以执行下去,反之就算mu获取了锁,也会进入for循环中执行wait,然后释放锁,沉睡下去,直到被Signal/Brodcast唤醒.
+
+
+
+
+
+---go如何调试代码?
