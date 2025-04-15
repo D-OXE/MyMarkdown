@@ -776,3 +776,189 @@ func write(key, value string) {
 
 >锁只是**约定不做修改操作(互斥锁和读写锁都是这个道理)**,如果我在锁的临界区(读写锁/互斥锁)做修改操作,编译器也检测不出来,只是最后可能得到的结果事与愿违,**锁诞生的意义本来也就是为了避免这个情况发生.**
 
+---
+
+## DAY8
+
+### go的并发编程包sync一些其他常用的包
+
+### **sync.WaitGroup(等待组)**: 
+
+任务计数器,是sync包提供的一个同步工具,用于等待goroutine的执行,确保在任务执行完毕之后再执行剩余代码.
+
+**sync.WaitGroup的方法**:
+
+- **Add(delta int)**：此方法增加或减少 WaitGroup 计数器的值。通常，在创建一组工作之前调用 Add 方法来设置计数器的值为你要等待的工作单元数量。也可以通过传递负数来减少计数。
+- **Done()**：等同于调用 `wg.Add(-1)`，用于标记一项工作的完成。每个工作单元完成后应该调用一次 Done 方法来递减计数器。
+- **Wait()**：阻塞当前 goroutine 直到 WaitGroup 计数器归零。通常在主 goroutine 中调用 Wait 方法，以等待所有其他工作 goroutine 完成。
+
+> ```go
+> package main
+> 
+> import (
+>     "fmt"
+>     "sync"
+>     "time"
+> )
+> 
+> func worker(id int, wg *sync.WaitGroup) {
+>     defer wg.Done() // 在函数退出时通知WaitGroup任务已完成
+>     fmt.Printf("Worker %d starting\n", id)
+>     time.Sleep(time.Second) // 模拟工作
+>     fmt.Printf("Worker %d done\n", id)
+> }
+> 
+> func main() {
+>     var wg sync.WaitGroup	//声明sync.WaitGroup变量.
+> 
+>     for i := 1; i <= 5; i++ {
+>         wg.Add(1) // 增加计数器，表示将有一个新的goroutine开始工作
+>         go worker(i, &wg)
+>     }
+> 
+>     wg.Wait() // 等待直到计数器变为0，即所有goroutine都完成了它们的工作
+>     fmt.Println("All workers done")
+> }
+> ```
+>
+> 在这个例子中，我们启动了5个 goroutine 来模拟工作，并使用 `sync.WaitGroup` 来确保主程序会等待所有工作 goroutine 完成后再打印出 "All workers done"。
+
+
+
+### **sync.Once**: 
+
+一次性执行. 确保某个函数只执行一次,常用于初始化.
+
+> ```go
+> var once sync.Once
+> var config map[string]string
+> 
+> func loadConfig() {
+>     once.Do(func() {
+>         config = make(map[string]string)
+>         // 初始化配置...
+>     })
+> }
+> ```
+>
+> 特点: 即使上述的Do函数多次调用, 最后也只有一次被执行,-----> 可以用来实现单例.
+
+根据例子以及这个变量的特性,可以知道,sync.Once的Do函数传入的**对象是一个函数.而不是值.**另外,sync的这个结构体只有一个对应的方法,就是Do方法,没有sync.WaitGroup这样的3个方法.
+
+> Do函数接受的传参是一个无返回值的函数对象,但是可以使用闭包的操作完成捕获外部变量的作用.例如:
+>
+> ```go
+> package main
+> 
+> import (
+> 	"fmt"
+> 	"sync"
+> )
+> 
+> var a1 = 10
+> 
+> func main() {
+> 	var b1 = 20
+> 	var one sync.Once
+> 
+> 	one.Do(func() {
+> 		a1 += 2
+> 		b1 += 4
+> 	})
+> 
+> 	fmt.Println("a1 = ", a1, "b1 = ", b1)
+> }
+> 
+> 
+> //以下是shell执行程序的结果.
+> //once@DOXE-Desktop ~/桌/g/testgo> ./testgo 
+> //a1 =  12 b1 =  24
+> //once@DOXE-Desktop ~/桌/g/testgo> 
+> 
+> ```
+>
+> 可见,a1和b1都被修改.
+
+
+
+### **额外知识:闭包**
+
+闭包是一个**函数与该函数创建时**的词法环境(lexical environment)组合而成的实体.这个“词法环境”指:**函数内部能访问到的外部变量,参数集合**。这意味着，即使函数在其原始作用域之外被调用，它仍然能够访问并操作这些外部变量(相当于存了一份快照)。
+
+
+
+**闭包的工作原理:**在Go语言中，闭包允许一个函数捕获并持有其定义时的局部变量，即使这个函数在其原始的作用域之外被调用，它仍能访问并修改这些变量。这主要通过以下几点实现
+
+1. **捕获变量**：当定义一个匿名函数时，如果该函数引用了其外层作用域中的变量，那么这个匿名函数就会捕获这些变量，并将它们保存起来。换句话说，这些变量成为了这个匿名函数的一部分。
+2. **延长变量生命周期**：通常情况下，局部变量在离开其作用域后会被销毁。但是，如果存在一个闭包引用了这些局部变量，那么这些变量的生命周期将会被延长，直到不再有任何闭包引用它们为止。
+3. **共享状态**：由于闭包持有对外部变量的引用，多个闭包可以共享并修改这些变量的状态。这使得闭包非常适合用于需要保持某些状态的场景。
+
+例子:
+
+```go
+package main
+
+import "fmt"
+
+func makeCounter() func() int {
+    count := 0 // 局部变量
+    return func() int {
+        count++ // 闭包捕获并修改了count变量
+        return count
+    }
+}
+
+func main() {
+    counter := makeCounter()
+    fmt.Println(counter()) // 输出: 1
+    fmt.Println(counter()) // 输出: 2
+}
+
+//shell的输出:
+//once@DOXE-Desktop ~/桌/g/testgo> go build .
+//once@DOXE-Desktop ~/桌/g/testgo> ./testgo 
+//1
+//2
+```
+
+可见,count生命周期被延长.每个函数对象保存一份
+
+
+
+### sync.Cond (条件变量)
+
+用于goroutine间的通知机制，**基于锁的条件等待**。使用起来和std::conditionvariale相似
+
+```go
+var mu sync.Mutex
+var cond = sync.NewCond(&mu)
+var ready bool
+
+func worker() {
+    time.Sleep(time.Second)
+    mu.Lock()
+    ready = true
+    cond.Signal() // 通知一个等待的goroutine
+    mu.Unlock()
+}
+
+func main() {
+    go worker()
+    
+    mu.Lock()
+    for !ready {	// 防止虚假唤醒
+        cond.Wait() // 等待条件满足
+    }
+    mu.Unlock()	
+    fmt.Println("ready")
+}
+```
+
+**sync.Cond 有4 个方法:**
+
+1. **`NewCond(l Locker) *Cond`**：构造函数，**创建一个新的 Cond 实例并返回**，需要传入一个实现了 Locker 接口的锁（如 `*sync.Mutex` 或 `*sync.RWMutex`），这个锁将用于保护条件变量。
+2. **`(c *Cond) Wait()`**：使当前 goroutine 等待条件变量变为 true。该方法首先解锁 Cond 关联的锁，然后阻塞当前 goroutine，直到另一个 goroutine 调用了 Broadcast 或 Signal 方法唤醒它。被唤醒后，在返回之前会重新加锁。
+3. **`(c *Cond) Signal()`**：如果存在等待的 goroutines，那么随机唤醒其中一个。注意，即使没有 goroutine 在等待，调用 Signal 也不会产生错误。
+4. **`(c *Cond) Broadcast()`**：唤醒所有正在等待 Cond 的 goroutines。同样，如果没有 goroutine 在等待，调用 Broadcast 也不会产生错误。
+
+> 与C++一样,**需要防止虚假唤醒**,但是C++的虚假唤醒比go的轻松一些,因为C++的std::conditionvariale,2号参数可以直接写一个判断是否虚假唤醒的判断条件. 上例中,如果ready是true ,那么main routine就可以执行下去,反之就算mu获取了锁,也会进入for循环中执行wait,然后释放锁,沉睡下去,直到被Signal/Brodcast唤醒.
