@@ -966,6 +966,132 @@ func main() {
 
 ---
 
+## DAY9
+
+### go的内存分配机制
+
+go的内存分配机制是编译器**自己决定将变量放在堆区或者是栈区**,与程序员用不用`new`关键字没有关系.**决定变量分配在堆区或者栈区的机制是逃逸分析**.
+
+> 因此 ,go实际上没有语法直接指定分配位置, **由程序员的写法影响编译器的判断**,仅此而已.
+>
+> 另外 ,go的哲学之一是: 少操心内存.
+
+
+
+- **逃逸分析**:Go 编译器在编译阶段会分析变量的**作用域是否逃逸到函数外部**，决定分配位置:
+  - **不逃逸** → **栈上分配**（高效，自动回收）。
+  - **逃逸** → **堆上分配**（由 GC 管理）。
+
+> #### **触发逃逸的常见场景**
+>
+> - **返回指针或引用**：
+>
+>   ```go
+>   func foo() *int {
+>       x := 42 // x 逃逸到堆，因为返回值被外部引用
+>       return &x
+>   }
+>   ```
+>
+> - **被闭包捕获**：
+>
+>   ```go
+>   func bar() func() int {
+>       y := 100 // y 逃逸到堆，因被闭包引用
+>       return func() int { return y }
+>   }
+>   ```
+>
+> - **变量大小未知或动态**（如大对象、切片扩容）：
+>
+>   ```go
+>   func baz() {
+>       big := make([]int, 1e6) // 可能逃逸到堆（栈空间不足）
+>   }
+>   ```
+>
+> - **传递到全局变量或通道**：
+>
+>   ```go
+>   var global *int
+>   func qux() {
+>       z := 10 // z 逃逸到堆
+>       global = &z
+>   }
+>   ```
+
+
+
+### go的io复用
+
+**select**:go的内置语句,专门为channel操作设计的语句,使用起来类似switch语句,但是**只能用于channel**语句,**当case语句准备完毕,则会随机选取一个case执行,如果没有,就会阻塞;**
+
+```go
+package main
+
+import (
+	"fmt"
+	"time"
+)
+
+// 判断管道有没有存满
+func write(ch chan string) {
+	for {
+		select {
+		case ch <- "hello":
+			fmt.Println("write hello")
+		default:
+			fmt.Println("channel full")
+		}
+		time.Sleep(time.Millisecond * 500)
+	}
+}
+
+func main() {
+	// 创建管道
+	output1 := make(chan string, 10)
+
+	// 子协程写数据
+	go write(output1)
+
+	// 取数据
+	for s := range output1 {
+		fmt.Println("res:", s)
+		time.Sleep(time.Second)
+	}
+}
+```
+
+根据这个例子,go的select不仅可以执行等待数据, 也能执行主动发送数据, 因此, 上述语句的执行结果是不断的触发:
+
+```go
+//1
+case ch <- "hello":
+	fmt.Println("write hello")
+
+//2
+for s := range output1 {
+	fmt.Println("res:", s)
+	time.Sleep(time.Second)
+}
+```
+
+因此实际是无限循环,只是因为发送的频率更高吗,所以最后会阻塞一会在生产一个数据.说明**select会主动执行写channel**操作.
+
+> 但是select用来写channel,则需要额外的同步控制语句,如果本例中不写time.Sleep(time.Millisecond * 500), 则会瞬间发送很多次"write hello"字符串.
+>
+> 所以正常情况就用select监听接受语句就好.
+>
+> 即
+>
+> ```go
+> // ...
+> x := <- ch
+> // ...
+> ```
+>
+> 的形式的代码.
+
 
 
 
@@ -978,7 +1104,102 @@ func main() {
 
 go的语法本身不难,但是go的接口实在是过于灵活,以至于领悟起来极其坐牢.
 
+- **tips**:遇到包的函数不清楚的可以查官方帮助文档:  [https://pkg.go.dev](https://pkg.go.dev/?spm=5176.28103460.0.0.39601db8T3wHQf)  这里可以查看在线go文档和本地的.
 
+
+
+go的变量总是被明确定义的**值初始化**,也就是说,一个变量一旦被声明出来,**实际就是声明 + 定义了零值**,而这种操作对于go的接口来说,就是定义了一个空接口.(动态类型和动态值都是nil)
+
+
+
+> 调用空接口接口值的任何方法都会panic. 另外,空接口是**动态类型,动态值都是nil**的接口(  这里的空接口概念需要区分一下interface{} )
+
+看一个经典例子:
+
+```go
+package main
+
+import (
+	"bytes"
+	"fmt"
+	"io"
+)
+
+const debug = false
+
+func main() {
+	var buf *bytes.Buffer
+	if debug {
+		buf = new(bytes.Buffer) // enable collection of output
+	}
+	f(buf) // NOTE: subtly incorrect!
+	if debug {
+		// ...use buf...
+	}
+}
+
+// If out is non-nil, output will be written to it.
+func f(out io.Writer) {
+	// ...do something...
+	if out != nil {
+		fmt.Println("f 被执行了")	//任何情况下都执行了这一行.已经得到验证
+		out.Write([]byte("done!\n"))
+	}
+}
+
+```
+
+对于这个例子, 不论怎样,` fmt.Println("f 被执行了")`这一行都是执行了的,也就是说,即使buf接口,最开始是完全的nil接口,最后也变成了不是空接口的接口,但是debug是true/false时候,有区别:
+
+- debug= true时候,buf是一个new的**bytes.Buffer实例,而不是nil指针.**因此,这时候,动态类型是*bytes.Buffer,动态值是new(bytes.Buffer)---->底层的那个new出来的内存.
+- debug=false时候, buf只是声明的变量,此时是编译器自动赋值为nil.绝对的空接口.
+
+> 但是,在传入 f(out io.Writer)函数时候, **形参out发生了赋值**,因此两段代码都能进入if判断,而不是只有debug=false时进去,这就说明了, 形参out发生了赋值, 将buf的动态类型,动态值赋值给了out ,即使buf是空接口, buf原本的类型,bytes.Buffer也被赋值给了out的,因为out不是声明的.因此,out在任何情况下都不是nil,直接调用out.Write([]byte("done!\n")),在debug=false时候,会发生panic,因为buf没有实例,相当于nil指针调用了方法.
+
+
+
+
+
+---
+
+## 专辑内容2:常见包的使用
+
+1. ### fmt包:
+
+   - 关于print系列和scan系列(包括sprint/fprint), 使用起来和C语言的printf/scanf(fprint/fscanf  sprintf/sscanf)一样的规矩,不多扯了. 
+
+     > 显然go的语法足够一目了然, Print系列和Scan系列的Println和Scanln使用起来都是十分方便的.
+
+   - `fmt.Errorf(format string, a ...interface{}) error`：创建一个新的错误，带有格式化的错误消息。这是创建自定义错误信息的一种便捷方法。
+
+2. **bufio包**:
+
+   bufio 包本身主要由结构体组成，并没有定义额外的接口（因为它**依赖于 io 包**中的接口如 io.Reader 和 io.Writer）
+
+   1. bufio.Reader: 带缓冲的读取器，封装了 `io.Reader`，用于高效读取数据。常用方法:**加粗为常用的**
+      - **Read**(p []byte) (n int, err error)：读取数据到字节切片 `p`。
+      - ReadByte() (byte, error)：读取单个字节。
+      - ReadBytes(delim byte) ([]byte, error)：读取直到遇到分隔符 `delim`（返回字节切片，包含分隔符）。
+      - **ReadString**(delim byte) (string, error)：与 `ReadBytes` 类似，但返回字符串（包含分隔符）。
+      - Peek(n int) ([]byte, error)：预览接下来的 `n` 字节（不移动读取位置）。
+      - UnreadByte()：回退一个字节到缓冲区。
+      - UnreadRune()：回退一个 Unicode 码点到缓冲区。
+      - **NewReader**(rd io.Reader) *Reader: 传入一个io.Reader接口(依赖io包),返回一个带默认缓冲区（4096字节）的 `*bufio.Reader`.
+      - NewReaderSize(rd io.Reader, size int) *Reader: 同上,只是**可以自定义缓冲区大小**.
+      
+      > 它在原始数据源和代码之间插入了一个内存缓冲层，**通过智能填充/消费这个缓冲区来优化读取效率**。可以说,bufio.Reader是io.Reader和用户态缓冲区(可能是切片,也可能是其他)的一个中间缓冲区. **bufio.Reader优化的目标是:减少从底层读取的次数**.
+      >
+      > 所以Writer也是类似的道理. 不过API略有不同. **Reader和Writer在设计上是完全对称的**.有少许各自特有的API.
+
+
+
+
+
+
+
+
+
+---
 
 
 
